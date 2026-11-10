@@ -1,0 +1,317 @@
+package com.example.maprouter
+
+import android.content.Context
+import android.content.Intent
+import android.graphics.Color
+import android.net.Uri
+import android.os.Bundle
+import android.widget.Button
+import android.widget.ScrollView
+import android.widget.TextView
+import androidx.appcompat.app.AppCompatActivity
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
+import java.time.Instant
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.net.HttpURLConnection
+
+enum class MTYPE
+{
+    SUCCESS,
+    ERROR
+}
+
+class Result
+{
+    public var uri:Uri = Uri.parse("error")
+    public var message:String = "null"
+    public var status:Boolean = false
+    init
+    {
+        message = "null"
+        status = false
+        uri = Uri.parse("error")
+    }
+}
+
+
+class MainActivity : AppCompatActivity() {
+
+    private lateinit var currentAppLabel: TextView
+    private lateinit var saveButton: Button
+    private lateinit var debugBox: TextView
+    private lateinit var debugScroll: ScrollView
+
+
+    private var tempSelectedPackage: String? = null
+    private var tempSelectedAppName: String? = null
+    private val prefsName = "MapInterceptorPrefs"
+    private val keySavedPackage = "saved_package_name"
+    private val keySavedAppName = "saved_app_name"
+
+
+    private fun system_message(message:String,type: MTYPE)
+    {
+        if(type== MTYPE.SUCCESS)
+        {
+            debugBox.setTextColor(Color.MAGENTA);
+            debugBox.append(Instant.now().toString() + ": "+message+ "\n");
+        }
+        else if(type == MTYPE.ERROR)
+        {
+            debugBox.setTextColor(Color.RED);
+            debugBox.append(Instant.now().toString() + ": "+message+ "\n");
+        }
+        debugScroll?.post {
+            debugScroll.fullScroll(ScrollView.FOCUS_DOWN)
+        }
+    }
+
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        val sharedPrefs = getSharedPreferences(prefsName, Context.MODE_PRIVATE)
+        val savedPackage = sharedPrefs.getString(keySavedPackage, null)
+
+        setContentView(R.layout.activity_main)
+        debugScroll = findViewById<ScrollView>(R.id.debugScroll)
+        debugBox = findViewById(R.id.debugBox)
+        debugBox.text = "";
+        system_message("application started",MTYPE.SUCCESS)
+
+        // 1. Check if the app was opened via an external link (ACTION_VIEW)
+        if (intent?.action == Intent.ACTION_VIEW && intent?.data != null) {
+            val linkUri = intent.data!!
+            if (savedPackage != null) {
+                // If a default app is already saved, forward immediately and close
+                forwardLinkToApp(savedPackage, linkUri)
+                return
+            }
+        }
+
+
+
+        currentAppLabel = findViewById(R.id.currentAppLabel)
+        saveButton = findViewById(R.id.saveButton)
+
+        val savedAppName = sharedPrefs.getString(keySavedAppName, "None") ?: "None"
+        currentAppLabel.text = "Current Default App: $savedAppName"
+
+        val recyclerView = findViewById<RecyclerView>(R.id.recyclerViewApps)
+        recyclerView.layoutManager = LinearLayoutManager(this)
+
+        // Query all installed packages
+        val packages = packageManager.getInstalledPackages(0)
+        val appList = packages.mapNotNull { packageInfo ->
+            val appInfo = packageInfo.applicationInfo ?: return@mapNotNull null
+            val appName = packageManager.getApplicationLabel(appInfo).toString()
+            val packageName = packageInfo.packageName
+            val icon = try {
+                packageManager.getApplicationIcon(packageName)
+            } catch (e: Exception) {
+                getDrawable(android.R.drawable.sym_def_app_icon)!!
+            }
+            AppInfo(appName, packageName, icon)
+        }.sortedBy { it.name }
+
+        // 3. Handle list item selection (staging the choice)
+        recyclerView.adapter = AppAdapter(appList) { selectedApp ->
+            tempSelectedPackage = selectedApp.packageName
+            tempSelectedAppName = selectedApp.name
+            saveButton.isEnabled = true
+            saveButton.text = "Save '${selectedApp.name}' as Default"
+        }
+
+        // 4. Handle Save Button click to persist selection
+        saveButton.setOnClickListener {
+            val pkg = tempSelectedPackage
+            val name = tempSelectedAppName
+            if (pkg != null && name != null) {
+                sharedPrefs.edit().apply {
+                    putString(keySavedPackage, pkg)
+                    putString(keySavedAppName, name)
+                    apply()
+                }
+                currentAppLabel.text = "Current Default App: $name"
+                saveButton.text = "Saved Successfully!"
+                saveButton.isEnabled = false
+            }
+        }
+    }
+
+
+
+    private fun forwardLinkToApp(targetPackageName: String, uri: Uri) {
+        val fullUrl = uri.toString()
+        system_message("working on uri:: $fullUrl", MTYPE.SUCCESS)
+
+        lifecycleScope.launch {
+            // 1. Resolve the short link in the background to get the real coordinates
+            val result = withContext(Dispatchers.IO) {
+                system_message("parsing geo coordinates from url. please wait..", MTYPE.SUCCESS)
+                //process_url_via_webbrowser(fullUrl)
+                unshortenUrlViaKotlin(fullUrl)
+            }
+            system_message(result.uri.toString() + " " + result.message,MTYPE.SUCCESS)
+
+            /*
+
+
+            if (result.status) {
+                system_message("successfully parsed geo coordinates", MTYPE.SUCCESS)
+                val parsedGeoUri = result.uri // This is your clean geo:lat,lon URI
+
+                // 2. Open Google Maps using the resolved coordinates so it displays properly
+                val mapsIntent = Intent(Intent.ACTION_VIEW, parsedGeoUri).apply {
+                    setPackage("com.google.android.apps.maps")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                try {
+                    system_message("launching google maps..", MTYPE.SUCCESS)
+                    startActivity(mapsIntent)
+                } catch (e: Exception) {
+                    system_message("could not launch google maps..", MTYPE.ERROR)
+                }
+
+                // 3. Open Waze (or your chosen target app) using the same coordinates
+                val targetUri = if (targetPackageName == "com.waze") {
+                    // Convert geo URI to Waze format if Waze is targeted
+                    val queryParams = parsedGeoUri.schemeSpecificPart
+                    val coords = queryParams.substringBefore("?")
+                    Uri.parse("waze://?ll=$coords&navigate=yes")
+                } else {
+                    parsedGeoUri
+                }
+
+                val forwardIntent = Intent(Intent.ACTION_VIEW, targetUri).apply {
+                    setPackage(targetPackageName)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+
+                try {
+                    system_message("sending coordinates to $targetPackageName", MTYPE.SUCCESS)
+                    startActivity(forwardIntent)
+                } catch (e: Exception) {
+                    system_message("error while sending coordinates to app", MTYPE.ERROR)
+                    val launchIntent = packageManager.getLaunchIntentForPackage(targetPackageName)
+                    if (launchIntent != null) {
+                        startActivity(launchIntent)
+                    }
+                }
+            } else {
+                system_message("error while parsing geo coordinates, detail = "+result.message, MTYPE.ERROR)
+            }
+            */
+            // 4. Now safely finish the activity after everything has launched and logged
+            kotlinx.coroutines.delay(10000) // Brief pause to let user read debug messages
+            finish()
+        }
+    }
+
+    private fun unshortenUrlViaKotlin(shortUrl: String): Result {
+        var result:Result = Result()
+
+        var currentUrl = shortUrl
+        try {
+            var connection: java.net.HttpURLConnection? = null
+            var redirectCount = 0
+            val maxRedirects = 5
+
+            while (redirectCount < maxRedirects) {
+                val url = java.net.URL(currentUrl)
+                connection = url.openConnection() as java.net.HttpURLConnection
+                connection.instanceFollowRedirects = false // Manually track redirects like Python
+                connection.connectTimeout = 5000
+                connection.readTimeout = 5000
+                // Use a standard mobile browser User-Agent so Google treats it like a real device
+                connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
+                connection.connect()
+
+                val responseCode = connection.responseCode
+                system_message(connection.responseMessage, MTYPE.SUCCESS)
+                if (responseCode in 300..399) {
+                    val location = connection.getHeaderField("Location")
+                    system_message(location.toString(), MTYPE.SUCCESS)
+                    if (!location.isNullOrEmpty()) {
+                        // Handle relative redirect paths if necessary
+                        currentUrl = if (location.startsWith("http")) {
+                            location
+                        } else {
+                            java.net.URL(url, location).toString()
+                        }
+                        redirectCount++
+                        connection.disconnect()
+                        continue
+                    }
+                }
+                break
+            }
+            connection?.disconnect()
+        } catch (e: Exception) {
+            result.message =e.message.toString()
+            e.printStackTrace()
+        }
+
+        result.uri = Uri.parse(currentUrl)
+        return result
+    }
+
+
+
+
+
+    private fun process_url_via_webbrowser(shortUrl: String): Result{
+        var result:Result = Result();
+
+        try {
+            val url = java.net.URL("https://maps.app.goo.gl/pd4TSBkybhHY3PgD9")
+            val connection = url.openConnection() as java.net.HttpURLConnection
+            connection.instanceFollowRedirects = true
+            connection.connectTimeout = 10000
+            connection.readTimeout = 10000
+            connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            connection.connect()
+
+
+            val responseCode = connection.responseCode
+            if (responseCode == HttpURLConnection.HTTP_OK) {
+                // This will give you the final resolved Google Maps URL
+                result.uri= Uri.parse(connection.url.toString())
+                result.status = true
+            } else if (responseCode in 300..399) {
+                // Fallback: If it still returns a redirect code, grab the Location header
+               result.uri = Uri.parse(connection.getHeaderField("Location").toString())
+               result.status = true
+
+            }
+            connection.disconnect()
+
+
+            /*
+            val headerField = connection.getHeaderField("Location")
+            if (!headerField.isNullOrEmpty()) {
+                val latLongRegex = "@(-?\\d+\\.\\d+),(-?\\d+\\.\\d+)".toRegex()
+                val matchResult = latLongRegex.find(headerField)
+                if (matchResult != null) {
+                    val lat = matchResult.groupValues[1]
+                    val lon = matchResult.groupValues[2]
+                    result.message="success"
+                    result.status = true
+                    result.uri = Uri.parse("geo:$lat,$lon?q=$lat,$lon(Destination)")
+                }
+            }
+            else
+                result.message="header field is null or empty"
+            */
+
+
+        } catch (e: Exception) {
+            result.message = e.message.toString()
+            e.printStackTrace()
+        }
+        return result
+    }
+}

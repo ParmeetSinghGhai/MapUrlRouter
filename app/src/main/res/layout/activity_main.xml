@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <!-- 1. Label: App Name -->
+    <TextView
+        android:id="@+id/lblAppName"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="MapRouter"
+        android:textSize="24sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="16dp" />
+
+    <!-- 2. TextBox: User Input -->
+    <EditText
+        android:id="@+id/editText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="enter app packages here.."
+        android:textSize="16sp"
+        android:textColor="#000000"
+        android:textColorHint="#888888"
+        android:minHeight="48dp"
+        android:layout_marginBottom="16dp" />
+
+    <!-- 3. Button: Save Button -->
+    <Button
+        android:id="@+id/btnSave"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Save"
+        android:layout_marginBottom="16dp" />
+
+    <!-- 4. TextView With Scroll for Debug logs -->
+    <ScrollView
+        android:id="@+id/debugScroll"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:fillViewport="true"
+        android:background="#F5F5F5"
+        android:padding="8dp">
+
+        <TextView
+            android:id="@+id/debugBox"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="12sp"
+            android:textColor="#000000"
+            android:fontFamily="monospace"
+            android:text="Debug logs will appear here...\n"
+            android:textIsSelectable="true" />
+
+    </ScrollView>
+
+</LinearLayout>
