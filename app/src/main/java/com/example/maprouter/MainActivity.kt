@@ -37,9 +37,7 @@ class MainActivity : AppCompatActivity() {
             MTYPE.INFO -> "ℹ️ "
         }
         val currentTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
-        debugBox.append("\n${currentTime} level:: ${
-            msg.level.toString()
-        } \n$prefix ${msg.text}")
+        debugBox.append("\n${currentTime} \n$prefix ${msg.text}")
         debugBox.append("\n➖ ➖ ➖ ➖ ➖ ➖ ➖ ➖ ➖ ➖ ➖ ➖ ➖ ➖ ➖ ➖\n")
     }
 
@@ -60,10 +58,10 @@ class MainActivity : AppCompatActivity() {
 
         //use app manager to filter out installed apps in the system
         appManager.getApps(this@MainActivity,savedApps)
-        var msg = QueueMessage("",MTYPE.INFO, MLEVEL.SETTINGS)
+        var msg = QueueMessage("",MTYPE.INFO)
         if(appManager.installedApps.isEmpty())
         {
-            msg = QueueMessage("no apps saved",MTYPE.ERROR,MLEVEL.SETTINGS)
+            msg = QueueMessage("no apps saved",MTYPE.ERROR)
         }
         else
         {
@@ -71,7 +69,7 @@ class MainActivity : AppCompatActivity() {
             var count = 1;
             for(appName in appManager.installedApps)
                 appsFound += "\n" + count++.toString()+ ". "+ appName
-            msg = QueueMessage("apps saved in settings::"+appsFound,MTYPE.INFO,MLEVEL.SETTINGS)
+            msg = QueueMessage("apps saved in settings::"+appsFound,MTYPE.INFO)
         }
         appendMessageToUi(msg)
 
@@ -85,13 +83,12 @@ class MainActivity : AppCompatActivity() {
         //processing incoming intent that started the app
         handleIncomingIntent(intent)
 
+        //clear background messages and handle outgoing Intents
         lifecycleScope.launch {
-            //processing outgoing intent
             while(true)
             {
                 if (messageDumpPermit.tryAcquire()) {
                     try {
-                        dumpBackgroundMessages()
                         handleOutgoingIntent()
                     } finally {
                         messageDumpPermit.release();
@@ -105,26 +102,24 @@ class MainActivity : AppCompatActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        setIntent(intent) // Required so 'intent' points to the new event
-        // Process intent if the app was already running when the user clicked a link
+        setIntent(intent)
         handleIncomingIntent(intent)
     }
 
     private fun handleIncomingIntent(intent: Intent?) {
-        debugBox.setText("");
-        appendMessageToUi(QueueMessage("new intent has been received and is being processed. please wait..", MTYPE.INFO,MLEVEL.INTENT_IN))
+        appendMessageToUi(QueueMessage("new intent has been received and is being processed. please wait..", MTYPE.INFO))
 
         //malformed or corrupt intent
         if (intent == null || intent.action != Intent.ACTION_VIEW)
         {
-            appendMessageToUi(QueueMessage("new intent is either null or corrupted", MTYPE.ERROR,MLEVEL.INTENT_IN))
+            appendMessageToUi(QueueMessage("new intent is either null or corrupted", MTYPE.ERROR))
             return
         }
 
         //applications are not saved in the settings
         if(appManager.installedApps.isEmpty())
         {
-            appendMessageToUi(QueueMessage("no apps/package names saved in application settings", MTYPE.ERROR,MLEVEL.INTENT_IN))
+            appendMessageToUi(QueueMessage("no apps/package names saved in application settings", MTYPE.ERROR))
             return
         }
 
@@ -132,7 +127,7 @@ class MainActivity : AppCompatActivity() {
         val intentUri: Uri? = intent?.data
         if (intentUri == null)
         {
-            appendMessageToUi(QueueMessage("received intent uri data is empty or null", MTYPE.ERROR,MLEVEL.INTENT_IN))
+            appendMessageToUi(QueueMessage("received intent uri data is empty or null", MTYPE.ERROR))
             return
         }
 
@@ -141,44 +136,64 @@ class MainActivity : AppCompatActivity() {
             try {
                 // Assign the network data back to your parent variable
                 messageDumpPermit.acquire()
-                networkManager.unshortenUrl(intentUri)
+                networkManager.networkQuery.originalUrl = intentUri
+                networkManager.unshortenUrl()
             } finally {
-                // 3. CRITICAL: Open the gate so latch.await() stops blocking
+                var type:MTYPE = MTYPE.ERROR
+                if(networkManager.networkQuery.status)
+                    type = MTYPE.SUCCESS
+
+                val msg ="\nnetwork and parsing summary::\n"+
+                        "original url:: ${networkManager.networkQuery.originalUrl}\n"+
+                        "geo url:: ${networkManager.networkQuery.geoUrl}\n"+
+                        "response code:: ${networkManager.networkQuery.responseCode.toString()}\n"+
+                        "location header:: ${networkManager.networkQuery.locationHeader}\n"+
+                        "parsing pattern:: ${networkManager.networkQuery.parsingPattern}\n"+
+                        "destination:: ${networkManager.networkQuery.destination}\n"+
+                        "latitude:: ${networkManager.networkQuery.latitude.toString()}\n"+
+                        "longitude:: ${networkManager.networkQuery.longitude}\n"+
+                        "status message:: ${networkManager.networkQuery.statusMessage}\n"+
+                        "status:: ${networkManager.networkQuery.status.toString()}\n"
+
+                appendMessageToUi(QueueMessage(msg,type))
                 messageDumpPermit.release()
             }
         }
 
     }
 
-    private fun dumpBackgroundMessages()
-    {
-        //dump all messages here
-        for(msg in MessageQueueManager.messageQueue)
-            appendMessageToUi(msg)
-        MessageQueueManager.messageQueue.clear()
-    }
-
     private fun handleOutgoingIntent()
     {
-       if (networkManager.result.first) {
+       if (networkManager.networkQuery.status) {
             for (appName in appManager.installedApps) {
-                val outGoingIntent = Intent(Intent.ACTION_VIEW).apply {
-                    data = networkManager.result.second
-                    setPackage(appName)
+                var outGoingIntent:Intent? = null
+                if(appName == "com.google.android.apps.maps")
+                {
+                    //open google maps with original url
+                    outGoingIntent= Intent(Intent.ACTION_VIEW).apply {
+                        data = networkManager.networkQuery.originalUrl
+                        setPackage(appName)
+                    }
                 }
+                else
+                {
+                    //open other apps with geo url
+                    outGoingIntent= Intent(Intent.ACTION_VIEW).apply {
+                        data = networkManager.networkQuery.geoUrl
+                        setPackage(appName)
+                    }
+                }
+
+
                 try {
                     startActivity(outGoingIntent)
                     appendMessageToUi(
-                        QueueMessage("successfully sent geocoordinates uri:: \n${networkManager.result.second} \nto app:: " + appName,
-                        MTYPE.SUCCESS,
-                        MLEVEL.INTENT_OUT)
+                        QueueMessage("successfully sent geocoordinates uri:: \n${outGoingIntent.data.toString()} \nto app:: " + appName,MTYPE.SUCCESS)
                     )
                 } catch (e: Exception) {
                     appendMessageToUi(
-                        QueueMessage("error while sending geocoordinates uri:: \n${networkManager.result.second} \nto app:: " + appName + " \nexception:: ${e.localizedMessage}",
-                        MTYPE.ERROR,
-                        MLEVEL.INTENT_OUT)
-                    )
+                        QueueMessage("error while sending geocoordinates uri:: \n${outGoingIntent.data.toString()} \nto app:: " + appName + " \nexception:: ${e.localizedMessage}",MTYPE.ERROR))
+
                 }
             }
         }

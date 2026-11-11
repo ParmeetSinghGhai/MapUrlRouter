@@ -1,2 +1,5 @@
 ./adb shell pm set-app-links --package com.example.maprouter 0 all
 ./adb shell pm set-app-links --package com.example.maprouter 1 all
+
+
+

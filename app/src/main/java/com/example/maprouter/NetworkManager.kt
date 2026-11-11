@@ -12,10 +12,34 @@ import android.net.Uri
 import android.util.Log
 
 
-data class GeoCoordinates(val latitude: Double, val longitude: Double, val destination: String?)
+data class GeoCoordinates(val latitude: Double?, val longitude: Double?, val destination: String?)
+data class NetworkQuery (
+    var originalUrl:Uri?,
+    var geoUrl:Uri?,
+    var responseCode:Int?,
+    var locationHeader:String?,
+    var parsingPattern:String?,
+    var destination:String?,
+    var latitude:Double?,
+    var longitude:Double?,
+    var statusMessage:String?,
+    var status:Boolean
+)
 
-class NetworkManager {
-    var result = Pair<Boolean,Uri?>(false,null)
+
+
+class NetworkManager() {
+    var networkQuery = NetworkQuery(
+        null,
+        null,
+        0,
+        null,
+        null,
+        null,
+        0.0,
+        0.0,
+        null,
+        false)
 
     private val bootstrapClient = OkHttpClient.Builder()
         .connectTimeout(5, TimeUnit.SECONDS)
@@ -39,17 +63,14 @@ class NetworkManager {
         .dns(secureGoogleDns)    // Forces ALL requests to use Google Secure DNS lookup
         .build()
 
-    private fun extractCoordinatesFromGoogleUrl(url: String?): GeoCoordinates? {
-        if (url.isNullOrEmpty())
-        {
-            MessageQueueManager.push("parsing of long url failed. the long url is empty or null",MTYPE.ERROR,MLEVEL.PARSING)
-            return null
-        }
-
+    private fun parseGeoUrlFromGoogleUrl() {
         try {
-            var lat:Double=0.0
-            var lon:Double=0.0
-            var destination:String? = null
+            var url:String? = null
+            if(networkQuery.locationHeader.isNullOrEmpty())
+                url = networkQuery.originalUrl.toString()
+            else
+                url = networkQuery.locationHeader.toString()
+
 
             // --- 1. GOOGLE MAPS OBFUSCATED DATA PACKET FORMAT (!3d / !4d) ---
             // Example: https://google.com
@@ -59,10 +80,14 @@ class NetworkManager {
             val internalLatMatch = internalDataLatPattern.find(url)
             val internalLonMatch = internalDataLonPattern.find(url)
             if (internalLatMatch != null && internalLonMatch != null) {
-                lat = internalLatMatch.groupValues[1].toDouble()
-                lon = internalLonMatch.groupValues[1].toDouble()
-                MessageQueueManager.push("parsing of long url was successful. pattern 3d /4d used ",MTYPE.SUCCESS,MLEVEL.PARSING)
-                return GeoCoordinates(lat, lon,destination)
+                networkQuery.latitude = internalLatMatch.groupValues[1].toDouble()
+                networkQuery.longitude = internalLonMatch.groupValues[1].toDouble()
+                networkQuery.destination = null
+                networkQuery.parsingPattern = "3d/4d"
+                networkQuery.geoUrl = Uri.parse("geo:${networkQuery.latitude.toString()},${networkQuery.longitude.toString()}?q=${networkQuery.latitude.toString()},${networkQuery.longitude.toString()}")
+                networkQuery.status = true
+                networkQuery.statusMessage = "operation completed successfully"
+                return
             }
 
             // --- 2. DIRECT VIEWPORT WINDOW FORMAT ---
@@ -71,10 +96,14 @@ class NetworkManager {
             val directPattern = "@(-?\\d+\\.\\d+),(-?\\d+\\.\\d+)".toRegex()
             val directMatch = directPattern.find(url)
             if (directMatch != null) {
-                lat = directMatch.groupValues[1].toDouble()
-                lon = directMatch.groupValues[2].toDouble()
-                MessageQueueManager.push("parsing of long url was successful. pattern @ used ",MTYPE.SUCCESS,MLEVEL.PARSING)
-                return GeoCoordinates(lat, lon,destination)
+                networkQuery.latitude = directMatch.groupValues[1].toDouble()
+                networkQuery.longitude  = directMatch.groupValues[2].toDouble()
+                networkQuery.destination = null
+                networkQuery.parsingPattern = "@"
+                networkQuery.geoUrl = Uri.parse("geo:${networkQuery.latitude.toString()},${networkQuery.longitude.toString()}?q=${networkQuery.latitude.toString()},${networkQuery.longitude.toString()}")
+                networkQuery.status = true
+                networkQuery.statusMessage = "operation completed successfully"
+                return
             }
 
             // --- 3. FLEXIBLE SEARCH QUERY / PARAMETER FORMAT ---
@@ -83,10 +112,14 @@ class NetworkManager {
             val queryPattern = "[?&](?:q|query)=(-?\\d+\\.\\d+)(?:,|\\+|%20|,\\s*)(-?\\d+\\.\\d+)".toRegex()
             val queryMatch = queryPattern.find(url)
             if (queryMatch != null) {
-                lat = queryMatch.groupValues[1].toDouble()
-                lon = queryMatch.groupValues[2].toDouble()
-                MessageQueueManager.push("parsing of long url was successful. pattern q /query used ",MTYPE.SUCCESS,MLEVEL.PARSING)
-                return GeoCoordinates(lat, lon,destination)
+                networkQuery.latitude = queryMatch.groupValues[1].toDouble()
+                networkQuery.longitude = queryMatch.groupValues[2].toDouble()
+                networkQuery.destination = null
+                networkQuery.parsingPattern = "q / query"
+                networkQuery.geoUrl = Uri.parse("geo:${networkQuery.latitude.toString()},${networkQuery.longitude.toString()}?q=${networkQuery.latitude.toString()},${networkQuery.longitude.toString()}")
+                networkQuery.status = true
+                networkQuery.statusMessage = "operation completed successfully"
+                return
             }
 
             // --- 4. DESTINATION / NAVIGATION ROUTE FORMAT ---
@@ -95,10 +128,14 @@ class NetworkManager {
             val destPattern = "(?:[?&]destination=|/dir/[^/]+/)(-?\\d+\\.\\d+),(-?\\d+\\.\\d+)".toRegex()
             val destMatch = destPattern.find(url)
             if (destMatch != null) {
-                lat = destMatch.groupValues[1].toDouble()
-                lon = destMatch.groupValues[2].toDouble()
-                MessageQueueManager.push("parsing of long url was successful. pattern destination used ",MTYPE.SUCCESS,MLEVEL.PARSING)
-                return GeoCoordinates(lat, lon,destination)
+                networkQuery.latitude = destMatch.groupValues[1].toDouble()
+                networkQuery.longitude = destMatch.groupValues[2].toDouble()
+                networkQuery.destination = null
+                networkQuery.parsingPattern = "destination coordinates"
+                networkQuery.geoUrl = Uri.parse("geo:${networkQuery.latitude.toString()},${networkQuery.longitude.toString()}?q=${networkQuery.latitude.toString()},${networkQuery.longitude.toString()}")
+                networkQuery.status = true
+                networkQuery.statusMessage = "operation completed successfully"
+                return
             }
 
             // --- 5. EMBEDDED INTENT/PLACE FALLBACK ---
@@ -106,10 +143,14 @@ class NetworkManager {
             val fallbackPattern = "(-?\\d+\\.\\d+),(?:\\+)?(-?\\d+\\.\\d+)".toRegex()
             val fallbackMatch = fallbackPattern.find(url)
             if (fallbackMatch != null) {
-                lat = fallbackMatch.groupValues[1].toDouble()
-                lon = fallbackMatch.groupValues[2].toDouble()
-                MessageQueueManager.push("parsing of long url was successful. pattern labels used ",MTYPE.SUCCESS,MLEVEL.PARSING)
-                return GeoCoordinates(lat, lon,destination)
+                networkQuery.latitude = fallbackMatch.groupValues[1].toDouble()
+                networkQuery.longitude = fallbackMatch.groupValues[2].toDouble()
+                networkQuery.destination = null
+                networkQuery.parsingPattern = "labels"
+                networkQuery.geoUrl = Uri.parse("geo:${networkQuery.latitude.toString()},${networkQuery.longitude.toString()}?q=${networkQuery.latitude.toString()},${networkQuery.longitude.toString()}")
+                networkQuery.status = true
+                networkQuery.statusMessage = "operation completed successfully"
+                return
             }
 
             // --- 6. MULTI-STOP DIRECTION PATH ENCODED DATA BLOCK PATTERN ---
@@ -121,10 +162,14 @@ class NetworkManager {
                 // If multiple coordinate sets are discovered, the last set is the final destination pin
                 val destinationMatch = directionMatches.last()
                 // Note: Google's internal layout format lists Longitude (!2d) first, then Latitude (!2d)
-                lon = destinationMatch.groupValues[1].toDouble()
-                lat = destinationMatch.groupValues[2].toDouble()
-                MessageQueueManager.push("parsing of long url successful. pattern dir/data used", MTYPE.SUCCESS, MLEVEL.PARSING)
-                return GeoCoordinates(lat, lon,destination)
+                networkQuery.latitude = destinationMatch.groupValues[1].toDouble()
+                networkQuery.latitude = destinationMatch.groupValues[2].toDouble()
+                networkQuery.destination = null
+                networkQuery.parsingPattern = "dir/data"
+                networkQuery.geoUrl = Uri.parse("geo:${networkQuery.latitude.toString()},${networkQuery.longitude.toString()}?q=${networkQuery.latitude.toString()},${networkQuery.longitude.toString()}")
+                networkQuery.status = true
+                networkQuery.statusMessage = "operation completed successfully"
+                return
             }
 
             // --- 7. GOOGLE MAPS API QUERY DESTINATION FORMAT ---
@@ -134,27 +179,33 @@ class NetworkManager {
             val apiDestMatch = apiDestPattern.find(url)
             if (apiDestMatch != null) {
                 val rawDestinationText = apiDestMatch.groupValues[1]
-                destination = android.net.Uri.decode(rawDestinationText).replace("+", " ")
-                MessageQueueManager.push("parsing of long url successful. pattern 'destination=' used", MTYPE.SUCCESS, MLEVEL.PARSING)
-                return GeoCoordinates(lat, lon,destination)
+                networkQuery.latitude = 0.0
+                networkQuery.longitude = 0.0
+                networkQuery.parsingPattern = "destination text in original url"
+                networkQuery.destination = android.net.Uri.decode(rawDestinationText).replace("+", " ")
+                networkQuery.geoUrl = Uri.parse("geo:0,0?q=" + android.net.Uri.encode(networkQuery.destination))
+                networkQuery.status = true
+                networkQuery.statusMessage = "operation completed successfully"
+                return
             }
 
         } catch (e: Exception) {
-            MessageQueueManager.push("parsing of long url failed::  ${e.localizedMessage} ",MTYPE.ERROR,MLEVEL.PARSING)
+            networkQuery.status = false
+            networkQuery.statusMessage = e.localizedMessage
+            return
         }
 
-        MessageQueueManager.push("parsing of long url failed:: url did not match any patterns ",MTYPE.ERROR,MLEVEL.PARSING)
-        return null
+        networkQuery.status = false
+        networkQuery.statusMessage = "url did not match any pattern"
+        return
     }
 
 
-    suspend fun unshortenUrl(url:Uri?):Pair<Boolean,Uri?> {
-        MessageQueueManager.push("unshorting url:: \n"+url.toString()+ " \nby establishing a http connection to google server. please wait..", MTYPE.INFO,MLEVEL.HTTP_CONNECTION)
-
-        return withContext(Dispatchers.IO) {
+    suspend fun unshortenUrl() {
+        withContext(Dispatchers.IO) {
             try {
                 val request = Request.Builder()
-                    .url(url.toString())
+                    .url(networkQuery.originalUrl.toString())
                     .header(
                         "User-Agent",
                         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)"
@@ -162,41 +213,21 @@ class NetworkManager {
                     .build()
 
                 client.newCall(request).execute().use { response ->
-                    val responseCode = response.code
-                    if (responseCode == 302 || responseCode == 301 || responseCode == 200) {
-                        MessageQueueManager.push("http connection passed with response code: $responseCode", MTYPE.SUCCESS,MLEVEL.HTTP_CONNECTION)
-                        val longUrl = response.header("Location")
-                        var coords: GeoCoordinates? = null
+                    networkQuery.responseCode = response.code
+                    if (networkQuery.responseCode == 302 || networkQuery.responseCode == 301 || networkQuery.responseCode == 200) {
+                        networkQuery.locationHeader = response.header("Location")
 
-                        //if location header is not present then use the actual url
-                        if(!longUrl.isNullOrEmpty())
-                            coords = extractCoordinatesFromGoogleUrl(longUrl)
-                        else
-                            coords = extractCoordinatesFromGoogleUrl(url.toString())
-
-                        //check if parser worked or not
-                        if (coords != null) {
-                            // Successfully extracted double variables!
-                            if(coords.destination != null)
-                            {
-                                val encodedPlace = android.net.Uri.encode(coords.destination)
-                                result = Pair(true,Uri.parse("geo:0,0?q=$encodedPlace"))
-                            }
-                            else {
-                                val lat = coords.latitude
-                                val lon = coords.longitude
-                                result = Pair(true, Uri.parse("geo:$lat,$lon?q=$lat,$lon"))
-                            }
-                        }
+                        parseGeoUrlFromGoogleUrl()
                     }
                     else {
-                        MessageQueueManager.push("failed to unshorten url. http connection error with response code: $responseCode",MTYPE.ERROR,MLEVEL.HTTP_CONNECTION)
+                        networkQuery.status = false
+                        networkQuery.statusMessage = "http connection error with incorrect response code"
                     }
                 }
             } catch (e: Exception) {
-                MessageQueueManager.push("failed to unshorten url. secure dns connection failed:: ${e.localizedMessage}",MTYPE.ERROR,MLEVEL.HTTP_CONNECTION)
+                networkQuery.status = false
+                networkQuery.statusMessage = "secure dns connection failed:: ${e.localizedMessage}"
             }
-            result
         }
     }
 
