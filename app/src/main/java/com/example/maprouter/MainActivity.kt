@@ -16,6 +16,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.Semaphore
+import android.util.Log
 
 private val messageDumpPermit = Semaphore(1)
 
@@ -38,7 +39,7 @@ class MainActivity : AppCompatActivity() {
         }
         val currentTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
         debugBox.append("\n${currentTime} \n$prefix ${msg.text}")
-        debugBox.append("\n➖ ➖ ➖ ➖ ➖ ➖ ➖ ➖ ➖ ➖ ➖ ➖ ➖ ➖ ➖ ➖\n")
+        debugBox.append("\n➖ ➖ ➖ ➖ ➖ ➖ ➖ ➖ ➖ ➖ ➖ ➖ ➖ ➖\n")
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -110,9 +111,9 @@ class MainActivity : AppCompatActivity() {
         appendMessageToUi(QueueMessage("new intent has been received and is being processed. please wait..", MTYPE.INFO))
 
         //malformed or corrupt intent
-        if (intent == null || intent.action != Intent.ACTION_VIEW)
+        if (intent == null || intent.action != Intent.ACTION_SEND)
         {
-            appendMessageToUi(QueueMessage("new intent is either null or corrupted", MTYPE.ERROR))
+            appendMessageToUi(QueueMessage("new intent is either null or not of type SEND", MTYPE.ERROR))
             return
         }
 
@@ -124,7 +125,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         //intent uri is empty or null
-        val intentUri: Uri? = intent?.data
+        val intentUri: Uri? =  Uri.parse(intent.getStringExtra(Intent.EXTRA_TEXT))
         if (intentUri == null)
         {
             appendMessageToUi(QueueMessage("received intent uri data is empty or null", MTYPE.ERROR))
@@ -145,13 +146,10 @@ class MainActivity : AppCompatActivity() {
 
                 val msg ="\nnetwork and parsing summary::\n"+
                         "original url:: ${networkManager.networkQuery.originalUrl}\n"+
+                        "unshorten url:: ${networkManager.networkQuery.unshortenUrl}\n"+
                         "geo url:: ${networkManager.networkQuery.geoUrl}\n"+
                         "response code:: ${networkManager.networkQuery.responseCode.toString()}\n"+
-                        "location header:: ${networkManager.networkQuery.locationHeader}\n"+
                         "parsing pattern:: ${networkManager.networkQuery.parsingPattern}\n"+
-                        "destination:: ${networkManager.networkQuery.destination}\n"+
-                        "latitude:: ${networkManager.networkQuery.latitude.toString()}\n"+
-                        "longitude:: ${networkManager.networkQuery.longitude}\n"+
                         "status message:: ${networkManager.networkQuery.statusMessage}\n"+
                         "status:: ${networkManager.networkQuery.status.toString()}\n"
 
@@ -166,25 +164,10 @@ class MainActivity : AppCompatActivity() {
     {
        if (networkManager.networkQuery.status) {
             for (appName in appManager.installedApps) {
-                var outGoingIntent:Intent? = null
-                if(appName == "com.google.android.apps.maps")
-                {
-                    //open google maps with original url
-                    outGoingIntent= Intent(Intent.ACTION_VIEW).apply {
-                        data = networkManager.networkQuery.originalUrl
-                        setPackage(appName)
-                    }
+                val outGoingIntent:Intent = Intent(Intent.ACTION_VIEW).apply {
+                    data = networkManager.networkQuery.geoUrl
+                    setPackage(appName)
                 }
-                else
-                {
-                    //open other apps with geo url
-                    outGoingIntent= Intent(Intent.ACTION_VIEW).apply {
-                        data = networkManager.networkQuery.geoUrl
-                        setPackage(appName)
-                    }
-                }
-
-
                 try {
                     startActivity(outGoingIntent)
                     appendMessageToUi(
@@ -197,8 +180,6 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
-
-
     }
 
 }
