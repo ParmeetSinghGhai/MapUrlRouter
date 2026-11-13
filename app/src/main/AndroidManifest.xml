@@ -4,6 +4,15 @@
     <!-- Must be outside the application tag -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Required for Android 10+ background geofencing -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+
+    <receiver
+        android:name=".GeofenceBroadcastReceiver"
+        android:exported="false" />
+
 
     <application
         android:allowBackup="true"
@@ -17,29 +26,14 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:noHistory="true"
+            android:excludeFromRecents="true"
             android:label="@string/app_name"
             android:theme="@style/Theme.MapRouter"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-
-            <!-- Intercept standard maps links and short links -->
-            <intent-filter android:autoVerify="true">
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-
-                <data android:scheme="https" />
-                <data android:host="www.google.com" />
-                <data android:pathPrefix="/maps" />
-
-                <!-- Accept standard web domains -->
-                <data android:scheme="http" android:host="maps.google.com" />
-                <data android:scheme="https" android:host="maps.google.com" />
-                <data android:scheme="https" android:host="goo.gl" />
-                <data android:scheme="https" android:host="maps.app.goo.gl" />
             </intent-filter>
 
             <intent-filter>

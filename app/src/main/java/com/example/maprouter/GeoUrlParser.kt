@@ -2,8 +2,26 @@ package com.example.maprouter
 
 import android.net.Uri
 
+data class ParserQuery(
+    var pattern:String?,
+    var geoUri:Uri?,
+    var lat:Double?,
+    var lon:Double?,
+    var statusMessage:String?,
+    var status:Boolean
+)
+
+
 class GeoUrlParser
 {
+    var parserQuery = ParserQuery(
+        pattern ="",
+        geoUri= null,
+        lat = 0.0,
+        lon = 0.0,
+        statusMessage = "",
+        status = false
+    )
 
     private val regexList:List<Pair<String,Regex>> = listOf(
         Pair("3d,4d","!3d(-?\\d+\\.\\d+)".toRegex()),
@@ -17,7 +35,7 @@ class GeoUrlParser
         Pair("place text","/place/([^/]+)/".toRegex())
     )
 
-    fun getGeoUrl(patternString:String):Pair<String?,Uri?>    {
+    fun getGeoUrl(patternString:String){
         var lat:Double? = null
         var lon:Double? = null
         var geoUri:Uri? = null
@@ -29,7 +47,7 @@ class GeoUrlParser
                 lat = matchResult1.groupValues[1].toDouble()
                 lon = matchResult2.groupValues[1].toDouble()
                 geoUri = Uri.parse("geo:${lat},${lon}?q=${lat},${lon}")
-                return Pair(regexList[0].first, geoUri)
+                parserQuery = ParserQuery(regexList[0].first, geoUri,lat,lon,"operation completed successfully",true)
             }
 
             for (i in 2..6) {
@@ -38,7 +56,7 @@ class GeoUrlParser
                     lat = matchResult.groupValues[1].toDouble()
                     lon = matchResult.groupValues[2].toDouble()
                     geoUri = Uri.parse("geo:${lat},${lon}?q=${lat},${lon}")
-                    return Pair(regexList[i].first, geoUri)
+                    parserQuery=  ParserQuery(regexList[i].first, geoUri,lat,lon,"operation completed successfully",true)
                 }
             }
 
@@ -47,15 +65,15 @@ class GeoUrlParser
                 if (matchResult != null) {
                     val dest = matchResult.groupValues[1].replace("+", " ")
                     geoUri = Uri.parse("geo:0,0?q=${dest}")
-                    return Pair(regexList[i].first, geoUri)
+                    parserQuery = ParserQuery(regexList[i].first, geoUri,lat,lon,"operation completed successfully",true)
                 }
             }
         }
         catch (e: Exception) {
-            return Pair(e.localizedMessage,null)
+            parserQuery = ParserQuery(e.localizedMessage,null,lat,lon,"error while parsing ${e.localizedMessage}",false)
         }
 
-        return Pair(null,null)
+        parserQuery = ParserQuery(null,null,lat,lon,"no pattern recognized in url",false)
     }
 }
 

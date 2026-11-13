@@ -10,29 +10,23 @@ import kotlinx.coroutines.withContext
 import okhttp3.Request
 import android.net.Uri
 
-
-data class GeoCoordinates(val latitude: Double?, val longitude: Double?, val destination: String?)
 data class NetworkQuery (
     var originalUrl:Uri?,
     var unshortenUrl:Uri?,
-    var geoUrl:Uri?,
     var responseCode:Int?,
-    var parsingPattern:String?,
     var statusMessage:String?,
     var status:Boolean
 )
-
-
 
 class NetworkManager() {
     var networkQuery = NetworkQuery(
         null,
         null,
         null,
-        0,
-        null,
-        null,
-        false)
+        "",
+        false
+    )
+
 
     private val bootstrapClient = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -73,31 +67,8 @@ class NetworkManager() {
                     if (networkQuery.responseCode == 200) {
                         val finalUrlString  = response.request.url.toString();
                         networkQuery.unshortenUrl= Uri.parse(finalUrlString)
-
-                        var geoUrlParser = GeoUrlParser()
-                        var parserResult = geoUrlParser.getGeoUrl(finalUrlString)
-                        var statusMessage:String? = null
-                        var status:Boolean = false
-                        var parsingPattern:String? = null
-                        var geoUrl:Uri? = null
-                        if(parserResult.second != null)
-                        {
-                            geoUrl = parserResult.second
-                            parsingPattern = parserResult.first
-                            status = true
-                            statusMessage = "operation completed successfully"
-                        }
-                        else
-                        {
-                            if(parserResult.first != null)
-                                statusMessage = parserResult.first
-                            else
-                                statusMessage = "no pattern match found in url"
-                        }
-                        networkQuery.geoUrl = geoUrl
-                        networkQuery.parsingPattern = parsingPattern
-                        networkQuery.status = status
-                        networkQuery.statusMessage = statusMessage
+                        networkQuery.status = true
+                        networkQuery.statusMessage = "operation completed successfully"
                     }
                     else {
                         networkQuery.status = false

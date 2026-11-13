@@ -10,15 +10,15 @@ import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import java.util.concurrent.Semaphore
-import android.util.Log
+import kotlinx.coroutines.delay
 
-private val messageDumpPermit = Semaphore(1)
+
+enum class MTYPE { SUCCESS, ERROR, INFO }
+
 
 class MainActivity : AppCompatActivity() {
 
@@ -29,16 +29,20 @@ class MainActivity : AppCompatActivity() {
     lateinit var debugScroll:ScrollView
     var appManager = AppManager()
     var networkManager = NetworkManager()
+    var geoUrlParser = GeoUrlParser()
 
 
-    private fun appendMessageToUi(msg: QueueMessage) {
-        val prefix = when (msg.type) {
+
+
+
+    fun log(msg:String,type:MTYPE) {
+        val prefix = when (type) {
             MTYPE.SUCCESS -> "✅ "
             MTYPE.ERROR -> "❌ "
             MTYPE.INFO -> "ℹ️ "
         }
         val currentTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
-        debugBox.append("\n${currentTime} \n$prefix ${msg.text}")
+        debugBox.append("\n${currentTime} \n$prefix ${msg}")
         debugBox.append("\n➖ ➖ ➖ ➖ ➖ ➖ ➖ ➖ ➖ ➖ ➖ ➖ ➖ ➖\n")
     }
 
@@ -59,10 +63,9 @@ class MainActivity : AppCompatActivity() {
 
         //use app manager to filter out installed apps in the system
         appManager.getApps(this@MainActivity,savedApps)
-        var msg = QueueMessage("",MTYPE.INFO)
         if(appManager.installedApps.isEmpty())
         {
-            msg = QueueMessage("no apps saved",MTYPE.ERROR)
+            log("no apps saved",MTYPE.ERROR)
         }
         else
         {
@@ -70,9 +73,8 @@ class MainActivity : AppCompatActivity() {
             var count = 1;
             for(appName in appManager.installedApps)
                 appsFound += "\n" + count++.toString()+ ". "+ appName
-            msg = QueueMessage("apps saved in settings::"+appsFound,MTYPE.INFO)
+            log("apps saved in settings::"+appsFound,MTYPE.INFO)
         }
-        appendMessageToUi(msg)
 
         //setup click event for save button
         btnSave.setOnClickListener {
@@ -83,22 +85,6 @@ class MainActivity : AppCompatActivity() {
 
         //processing incoming intent that started the app
         handleIncomingIntent(intent)
-
-        //clear background messages and handle outgoing Intents
-        lifecycleScope.launch {
-            while(true)
-            {
-                if (messageDumpPermit.tryAcquire()) {
-                    try {
-                        handleOutgoingIntent()
-                    } finally {
-                        messageDumpPermit.release();
-                        break;
-                    }
-                }
-                delay(1000)
-            }
-        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -108,19 +94,19 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handleIncomingIntent(intent: Intent?) {
-        appendMessageToUi(QueueMessage("new intent has been received and is being processed. please wait..", MTYPE.INFO))
+        log("new intent has been received and is being processed. please wait..", MTYPE.INFO)
 
         //malformed or corrupt intent
         if (intent == null || intent.action != Intent.ACTION_SEND)
         {
-            appendMessageToUi(QueueMessage("new intent is either null or not of type SEND", MTYPE.ERROR))
+            log("new intent is either null or not of type SEND", MTYPE.ERROR)
             return
         }
 
         //applications are not saved in the settings
         if(appManager.installedApps.isEmpty())
         {
-            appendMessageToUi(QueueMessage("no apps/package names saved in application settings", MTYPE.ERROR))
+            log("no apps/package names saved in application settings", MTYPE.ERROR)
             return
         }
 
@@ -128,37 +114,48 @@ class MainActivity : AppCompatActivity() {
         val intentUri: Uri? =  Uri.parse(intent.getStringExtra(Intent.EXTRA_TEXT))
         if (intentUri == null)
         {
-            appendMessageToUi(QueueMessage("received intent uri data is empty or null", MTYPE.ERROR))
+            log("received intent uri data is empty or null", MTYPE.ERROR)
             return
         }
 
-        //unshorten uri using network manager
+        //main background thread
         lifecycleScope.launch {
-            try {
-                // Assign the network data back to your parent variable
-                messageDumpPermit.acquire()
-                networkManager.networkQuery.originalUrl = intentUri
-                networkManager.unshortenUrl()
-            } finally {
-                var type:MTYPE = MTYPE.ERROR
-                if(networkManager.networkQuery.status)
-                    type = MTYPE.SUCCESS
+            var type:MTYPE = MTYPE.ERROR
 
-                val msg ="\nnetwork and parsing summary::\n"+
-                        "original url:: ${networkManager.networkQuery.originalUrl}\n"+
-                        "unshorten url:: ${networkManager.networkQuery.unshortenUrl}\n"+
-                        "geo url:: ${networkManager.networkQuery.geoUrl}\n"+
-                        "response code:: ${networkManager.networkQuery.responseCode.toString()}\n"+
-                        "parsing pattern:: ${networkManager.networkQuery.parsingPattern}\n"+
-                        "status message:: ${networkManager.networkQuery.statusMessage}\n"+
-                        "status:: ${networkManager.networkQuery.status.toString()}\n"
+            //unshorten uri using network manager
+            networkManager.networkQuery.originalUrl = intentUri
+            networkManager.unshortenUrl()
+            if(networkManager.networkQuery.status)
+                type = MTYPE.SUCCESS
+            val msg ="\nnetwork and parsing summary::\n"+
+                    "original url:: ${networkManager.networkQuery.originalUrl}\n"+
+                    "unshorten url:: ${networkManager.networkQuery.unshortenUrl}\n"+
+                    "geo url:: ${networkManager.networkQuery.geoUrl}\n"+
+                    "response code:: ${networkManager.networkQuery.responseCode.toString()}\n"+
+                    "parsing pattern:: ${networkManager.networkQuery.parsingPattern}\n"+
+                    "status message:: ${networkManager.networkQuery.statusMessage}\n"+
+                    "status:: ${networkManager.networkQuery.status.toString()}\n"
+            log(msg,type)
+            if(!networkManager.networkQuery.status)
+                return@launch
 
-                appendMessageToUi(QueueMessage(msg,type))
-                messageDumpPermit.release()
+            //get geo url from geoUrlParser
+            type = MTYPE.ERROR
+            if(geoUrlParser.parserQuery.status)
+                type = MTYPE.SUCCESS
+            geoUrlParser.getGeoUrl(networkManager.networkQuery.unshortenUrl.toString())
+            if(!geoUrlParser.parserQuery.status)
+            {
+
             }
-        }
 
+
+            //send outgoing intent to user chosen apps. handle outgoing intent will close the app
+            handleOutgoingIntent()
+           }
     }
+
+
 
     private fun handleOutgoingIntent()
     {
@@ -170,13 +167,16 @@ class MainActivity : AppCompatActivity() {
                 }
                 try {
                     startActivity(outGoingIntent)
-                    appendMessageToUi(
-                        QueueMessage("successfully sent geocoordinates uri:: \n${outGoingIntent.data.toString()} \nto app:: " + appName,MTYPE.SUCCESS)
+                    log(
+                        "successfully sent geocoordinates uri:: \n${outGoingIntent.data.toString()} \nto app:: " + appName,MTYPE.SUCCESS
                     )
-                } catch (e: Exception) {
-                    appendMessageToUi(
-                        QueueMessage("error while sending geocoordinates uri:: \n${outGoingIntent.data.toString()} \nto app:: " + appName + " \nexception:: ${e.localizedMessage}",MTYPE.ERROR))
 
+                    //close the app
+                    finish()
+                } catch (e: Exception) {
+                    log(
+                        "error while sending geocoordinates uri:: \n${outGoingIntent.data.toString()} \nto app:: " + appName + " \nexception:: ${e.localizedMessage}",MTYPE.ERROR
+                    )
                 }
             }
         }
